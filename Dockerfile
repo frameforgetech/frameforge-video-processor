@@ -4,24 +4,23 @@ FROM node:20-alpine AS builder
 # Install FFmpeg
 RUN apk add --no-cache ffmpeg
 
-WORKDIR /app
+WORKDIR /build
 
-# Copy shared contracts first
-COPY frameforge-shared-contracts/package*.json ./shared-contracts/
-COPY frameforge-shared-contracts/tsconfig.json ./shared-contracts/
-COPY frameforge-shared-contracts/src ./shared-contracts/src/
+# Copy and build shared contracts first
+COPY frameforge-shared-contracts/package*.json ./frameforge-shared-contracts/
+COPY frameforge-shared-contracts/tsconfig.json ./frameforge-shared-contracts/
+COPY frameforge-shared-contracts/src ./frameforge-shared-contracts/src/
 
-# Build shared contracts
-WORKDIR /app/shared-contracts
+WORKDIR /build/frameforge-shared-contracts
 RUN npm ci && npm run build
 
 # Copy video-processor files
-WORKDIR /app/video-processor
+WORKDIR /build/frameforge-video-processor
 COPY frameforge-video-processor/package*.json ./
+COPY frameforge-video-processor/tsconfig.json ./
 RUN npm ci
 
 COPY frameforge-video-processor/src ./src/
-COPY frameforge-video-processor/tsconfig.json ./
 RUN npm run build
 
 # Production stage
@@ -30,18 +29,19 @@ FROM node:20-alpine
 # Install FFmpeg and tini
 RUN apk add --no-cache ffmpeg tini
 
-# Set up shared contracts directory
-WORKDIR /app/shared-contracts
-COPY --from=builder /app/shared-contracts/package*.json ./
-COPY --from=builder /app/shared-contracts/dist ./dist/
+WORKDIR /app
+
+# Copy built shared contracts
+COPY --from=builder /build/frameforge-shared-contracts/package*.json ./frameforge-shared-contracts/
+COPY --from=builder /build/frameforge-shared-contracts/dist ./frameforge-shared-contracts/dist/
 
 # Set up video-processor directory
-WORKDIR /app/video-processor
+WORKDIR /app/frameforge-video-processor
 COPY frameforge-video-processor/package*.json ./
 RUN npm ci --only=production && \
     npm cache clean --force
 
-COPY --from=builder /app/video-processor/dist ./dist
+COPY --from=builder /build/frameforge-video-processor/dist ./dist
 
 RUN addgroup -g 1001 -S nodejs && \
     adduser -S nodejs -u 1001 && \
