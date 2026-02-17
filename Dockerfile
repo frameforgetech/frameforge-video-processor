@@ -12,13 +12,13 @@ COPY frameforge-shared-contracts/tsconfig.json ./frameforge-shared-contracts/
 COPY frameforge-shared-contracts/src ./frameforge-shared-contracts/src/
 
 WORKDIR /build/frameforge-shared-contracts
-RUN npm ci && npm run build
+RUN npm install && npm run build
 
 # Copy video-processor files
 WORKDIR /build/frameforge-video-processor
 COPY frameforge-video-processor/package*.json ./
 COPY frameforge-video-processor/tsconfig.json ./
-RUN npm ci
+RUN npm install
 
 COPY frameforge-video-processor/src ./src/
 RUN npm run build
@@ -38,7 +38,7 @@ COPY --from=builder /build/frameforge-shared-contracts/dist ./frameforge-shared-
 # Set up video-processor directory
 WORKDIR /app/frameforge-video-processor
 COPY frameforge-video-processor/package*.json ./
-RUN npm ci --only=production && \
+RUN npm install --only=production && \
     npm cache clean --force
 
 COPY --from=builder /build/frameforge-video-processor/dist ./dist
