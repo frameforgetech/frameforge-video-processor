@@ -1,4 +1,5 @@
 import dotenv from 'dotenv';
+import http from 'http';
 import { initializeDatabase } from './database';
 import { initializeRabbitMQ, closeRabbitMQ } from './queue';
 import { setupMetrics } from './metrics';
@@ -6,6 +7,15 @@ import { setupMetrics } from './metrics';
 dotenv.config();
 
 console.log('Video Processor Service starting...');
+
+// Health check server (used by k8s liveness/readiness probes)
+const healthPort = parseInt(process.env.PORT || '3002');
+http.createServer((_req, res) => {
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ status: 'ok', service: 'video-processor' }));
+}).listen(healthPort, () => {
+  console.log(`Health server listening on port ${healthPort}`);
+});
 
 async function startProcessor(): Promise<void> {
   try {

@@ -1,11 +1,11 @@
 import amqp from 'amqplib';
 import { AppDataSource } from './database';
-import { VideoJob } from '@frameforge/shared-contracts';
+import { VideoJob } from '@frameforgetech/shared-contracts';
 import { processVideoJob } from './processor';
 import { setupMetrics, incrementProcessed, incrementFailed } from './metrics';
 
-let channel: amqp.Channel;
-let connection: amqp.Connection;
+let channel: any;
+let connection: any;
 
 const QUEUE_NAME = 'video.processing';
 const EVENTS_QUEUE = 'video.events';
@@ -38,7 +38,7 @@ export async function initializeRabbitMQ(): Promise<void> {
     console.log(`Max concurrent jobs: ${MAX_CONCURRENT}`);
 
     // Start consuming messages
-    await channel.consume(QUEUE_NAME, async (msg) => {
+    await channel.consume(QUEUE_NAME, async (msg: amqp.ConsumeMessage | null) => {
       if (!msg) return;
 
       try {
@@ -55,7 +55,7 @@ export async function initializeRabbitMQ(): Promise<void> {
         console.error('Error processing message:', error);
         
         // Reject and requeue (up to 3 times)
-        const retryCount = (msg.properties.headers['x-retry-count'] || 0) + 1;
+        const retryCount = ((msg.properties.headers && msg.properties.headers['x-retry-count']) || 0) + 1;
         
         if (retryCount < 3) {
           // Requeue with retry count
@@ -74,7 +74,7 @@ export async function initializeRabbitMQ(): Promise<void> {
     });
 
     // Handle connection errors
-    connection.on('error', (err) => {
+    connection.on('error', (err: Error) => {
       console.error('RabbitMQ connection error:', err);
     });
 

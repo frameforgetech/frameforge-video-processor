@@ -1,4 +1,5 @@
 import { S3Client, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Readable } from 'stream';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -6,18 +7,31 @@ import * as os from 'os';
 import ffmpeg from 'fluent-ffmpeg';
 import archiver from 'archiver';
 import { v4 as uuidv4 } from 'uuid';
-import { Channel } from 'amqplib';
+import amqp from 'amqplib';
 import { AppDataSource } from './database';
-import { VideoJob } from '@frameforge/shared-contracts';
+import { VideoJob, JobStatus } from '@frameforgetech/shared-contracts';
 import { recordProcessingDuration, incrementFramesExtracted, incrementFailed } from './metrics';
 
-const s3Client = new S3Client({
+const s3ClientConfig: any = {
   region: process.env.AWS_REGION || 'us-east-1',
-  credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID || '',
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || '',
-  },
-});
+};
+
+// Only set explicit credentials if provided (for local/MinIO)
+if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
+  s3ClientConfig.credentials = {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  };
+}
+// Otherwise, SDK will automatically use IAM role from service account (IRSA)
+
+// Add endpoint only if specified (for MinIO compatibility)
+if (process.env.AWS_ENDPOINT) {
+  s3ClientConfig.endpoint = process.env.AWS_ENDPOINT;
+  s3ClientConfig.forcePathStyle = true;
+}
+
+const s3Client = new S3Client(s3ClientConfig);
 
 const FPS = parseInt(process.env.FPS || '1');
 const TEMP_DIR = process.env.TEMP_DIR || os.tmpdir();
@@ -42,7 +56,7 @@ interface ProcessingResult {
 
 export async function processVideoJob(
   message: VideoProcessingMessage,
-  channel: Channel,
+  channel: amqp.Channel,
   eventsQueue: string
 ): Promise<void> {
   const startTime = Date.now();
@@ -55,7 +69,7 @@ export async function processVideoJob(
     await fs.promises.mkdir(workDir, { recursive: true });
     
     // Update job status to processing
-    await updateJobStatus(message.jobId, 'processing', null, Date.now());
+    await updateJobStatus(message.jobId, JobStatus.PROCESSING, null, Date.now());
     
     // Download video from S3
     const videoPath = await downloadVideo(message.videoUrl, workDir);
@@ -91,7 +105,7 @@ export async function processVideoJob(
     console.log(`Result uploaded: ${resultUrl}`);
     
     // Update job status to completed
-    await updateJobStatus(message.jobId, 'completed', resultUrl, null, frameCount);
+    await updateJobStatus(message.jobId, JobStatus.COMPLETED, resultUrl, null, frameCount);
     
     // Publish success event
     await publishSuccessEvent(channel, eventsQueue, message, frameCount, resultUrl);
@@ -108,7 +122,7 @@ export async function processVideoJob(
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     
     // Update job status to failed
-    await updateJobStatus(message.jobId, 'failed', null, null, null, errorMessage);
+    await updateJobStatus(message.jobId, JobStatus.FAILED, null, null, null, errorMessage);
     
     // Publish failure event
     await publishFailureEvent(channel, eventsQueue, message, errorMessage);
@@ -144,9 +158,9 @@ async function downloadVideo(videoUrl: string, workDir: string): Promise<string>
   const videoPath = path.join(workDir, path.basename(key));
   const writeStream = fs.createWriteStream(videoPath);
   
-  await new Promise((resolve, reject) => {
+  await new Promise<void>((resolve, reject) => {
     (response.Body as Readable).pipe(writeStream);
-    writeStream.on('finish', resolve);
+    writeStream.on('finish', () => resolve());
     writeStream.on('error', reject);
   });
   
@@ -248,13 +262,19 @@ async function uploadResult(zipPath: string, userId: string, jobId: string): Pro
   
   await s3Client.send(command);
   
-  // Return permanent S3 URL
-  return `https://${RESULTS_BUCKET}.s3.${process.env.AWS_REGION || 'us-east-1'}.amazonaws.com/${key}`;
+  // Generate presigned URL valid for 7 days
+  const getCommand = new GetObjectCommand({
+    Bucket: RESULTS_BUCKET,
+    Key: key,
+  });
+  
+  const presignedUrl = await getSignedUrl(s3Client, getCommand, { expiresIn: 604800 }); // 7 days
+  return presignedUrl;
 }
 
 async function updateJobStatus(
   jobId: string,
-  status: 'processing' | 'completed' | 'failed',
+  status: JobStatus,
   resultUrl: string | null,
   startedAt: number | null,
   frameCount: number | null = null,
@@ -273,20 +293,20 @@ async function updateJobStatus(
     job.startedAt = new Date(startedAt);
   }
   
-  if (status === 'completed') {
+  if (status === JobStatus.COMPLETED) {
     job.completedAt = new Date();
-    job.resultUrl = resultUrl;
-    job.frameCount = frameCount;
-  } else if (status === 'failed') {
+    job.resultUrl = resultUrl || undefined;
+    job.frameCount = frameCount || undefined;
+  } else if (status === JobStatus.FAILED) {
     job.completedAt = new Date();
-    job.errorMessage = errorMessage;
+    job.errorMessage = errorMessage || undefined;
   }
   
   await jobRepo.save(job);
 }
 
 async function publishSuccessEvent(
-  channel: Channel,
+  channel: amqp.Channel,
   queueName: string,
   message: VideoProcessingMessage,
   frameCount: number,
@@ -308,7 +328,7 @@ async function publishSuccessEvent(
 }
 
 async function publishFailureEvent(
-  channel: Channel,
+  channel: amqp.Channel,
   queueName: string,
   message: VideoProcessingMessage,
   errorMessage: string
