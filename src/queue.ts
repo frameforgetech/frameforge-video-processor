@@ -1,8 +1,6 @@
 import amqp from 'amqplib';
-import { AppDataSource } from './database';
-import { VideoJob } from '@frameforgetech/shared-contracts';
 import { processVideoJob } from './processor';
-import { setupMetrics, incrementProcessed, incrementFailed } from './metrics';
+import { incrementProcessed, incrementFailed } from './metrics';
 
 let channel: any;
 let connection: any;

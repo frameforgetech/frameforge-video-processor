@@ -6,7 +6,6 @@ import * as path from 'path';
 import * as os from 'os';
 import ffmpeg from 'fluent-ffmpeg';
 import archiver from 'archiver';
-import { v4 as uuidv4 } from 'uuid';
 import amqp from 'amqplib';
 import { AppDataSource } from './database';
 import { VideoJob, JobStatus } from '@frameforgetech/shared-contracts';
@@ -36,8 +35,6 @@ const s3Client = new S3Client(s3ClientConfig);
 const FPS = parseInt(process.env.FPS || '1');
 const TEMP_DIR = process.env.TEMP_DIR || os.tmpdir();
 const RESULTS_BUCKET = process.env.S3_RESULTS_BUCKET || 'frameforge-results';
-const MAX_DURATION_MINUTES = 10;
-const SEGMENT_DURATION_MINUTES = 2;
 
 interface VideoProcessingMessage {
   jobId: string;
@@ -45,13 +42,6 @@ interface VideoProcessingMessage {
   videoUrl: string;
   filename: string;
   timestamp: string;
-}
-
-interface ProcessingResult {
-  success: boolean;
-  frameCount?: number;
-  resultUrl?: string;
-  errorMessage?: string;
 }
 
 export async function processVideoJob(

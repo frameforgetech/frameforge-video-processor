@@ -68,7 +68,6 @@ const mockFfmpeg = ffmpeg as jest.MockedFunction<typeof ffmpeg>;
 const mockFfprobe = (ffmpeg as any).ffprobe as jest.MockedFunction<any>;
 const mockArchiver = archiver as jest.MockedFunction<typeof archiver>;
 const mockGetRepository = AppDataSource.getRepository as jest.MockedFunction<any>;
-const mockCreateWriteStream = fsModule.createWriteStream as jest.MockedFunction<any>;
 const mockRm = (fsModule as any).__rm as jest.MockedFunction<any>;
 const mockReaddir = (fsModule as any).__readdir as jest.MockedFunction<any>;
 
@@ -89,11 +88,11 @@ function makeReadable() {
 }
 
 function setupHappyFfmpeg() {
-  const handlers: Record<string, Function> = {};
+  const handlers: Record<string, (...args: any[]) => void> = {};
   const inst = {
     outputOptions: jest.fn().mockReturnThis(),
     output: jest.fn().mockReturnThis(),
-    on: jest.fn().mockImplementation((ev: string, fn: Function) => { handlers[ev] = fn; return inst; }),
+    on: jest.fn().mockImplementation((ev: string, fn: (...args: any[]) => void) => { handlers[ev] = fn; return inst; }),
     run: jest.fn().mockImplementation(() => {
       setImmediate(() => handlers['end'] && handlers['end']());
     }),
@@ -120,7 +119,7 @@ function setupHappyPath() {
     .mockResolvedValueOnce({ Body: makeReadable() })
     .mockResolvedValue({});
   mockGetSignedUrl.mockResolvedValue('https://signed.url/r.zip' as any);
-  mockFfprobe.mockImplementation((_p: string, cb: Function) =>
+  mockFfprobe.mockImplementation((_p: string, cb: (...args: any[]) => void) =>
     cb(null, { streams: [{ codec_type: 'video' }] })
   );
   setupHappyFfmpeg();
@@ -205,7 +204,7 @@ describe('processVideoJob — errors', () => {
 
   it('throws when no video stream found', async () => {
     mockS3Send.mockResolvedValue({ Body: makeReadable() });
-    mockFfprobe.mockImplementation((_p: string, cb: Function) =>
+    mockFfprobe.mockImplementation((_p: string, cb: (...args: any[]) => void) =>
       cb(null, { streams: [{ codec_type: 'audio' }] })
     );
     await expect(processVideoJob(makeMsg() as any, makeChan() as any, 'ev'))
@@ -214,7 +213,7 @@ describe('processVideoJob — errors', () => {
 
   it('throws when ffprobe errors', async () => {
     mockS3Send.mockResolvedValue({ Body: makeReadable() });
-    mockFfprobe.mockImplementation((_p: string, cb: Function) =>
+    mockFfprobe.mockImplementation((_p: string, cb: (...args: any[]) => void) =>
       cb(new Error('bad'), null)
     );
     await expect(processVideoJob(makeMsg() as any, makeChan() as any, 'ev'))
@@ -223,7 +222,7 @@ describe('processVideoJob — errors', () => {
 
   it('throws when streams is empty', async () => {
     mockS3Send.mockResolvedValue({ Body: makeReadable() });
-    mockFfprobe.mockImplementation((_p: string, cb: Function) =>
+    mockFfprobe.mockImplementation((_p: string, cb: (...args: any[]) => void) =>
       cb(null, { streams: [] })
     );
     await expect(processVideoJob(makeMsg() as any, makeChan() as any, 'ev'))
